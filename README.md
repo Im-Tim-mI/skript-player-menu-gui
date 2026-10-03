@@ -6,6 +6,22 @@ A chest-GUI quick menu opened with Shift + F (or `/menu`): teleport to spawn or 
 
 > This repository has two editions of the same script: **繁體中文 (zh-TW)** is the original used on the author's Traditional Chinese server, and **English** is a full translation (commands, messages and variable names) with the same features.
 
+<!-- BEGIN LIVE SCREENSHOTS -->
+
+## Screenshots
+
+![Main menu chest GUI](docs/images/player-menu-gui.png)
+
+*`/menu` as an ordinary player: the 3-row `主選單` chest GUI exactly as the server sent it (`generic_9x3`, 5 buttons).*
+
+![Main menu with an item tooltip](docs/images/player-menu-gui-tooltip.png)
+
+*The same menu with the first button hovered. Item name and lore are the real values from the `window_items` packet.*
+
+> These are live-server captures, not native client screenshots. A headless client logged into a real Paper 26.2 server, triggered the script, and the block / UI data the server sent back was re-rendered using the official Minecraft 26.2 client assets. Mojang/Microsoft image assets are not covered by this repository's code licence.
+
+<!-- END LIVE SCREENSHOTS -->
+
 ## Features
 
 - Opens with sneak + swap hands (F) on Java, sneak + emote on Bedrock (needs a Geyser extension such as EmoteOffhand that turns emotes into an off-hand swap), or `/menu`
