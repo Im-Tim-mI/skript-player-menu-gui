@@ -1,0 +1,768 @@
+# ------------------------------------------------------------
+#  skript-player-menu-gui（繁體中文版）
+#  https://github.com/Im-Tim-mI/skript-player-menu-gui
+#  Copyright (c) 2026 廷廷小教室、廷廷的家（Tim945）
+#  授權：MIT + Commons Clause（詳見 LICENSE）
+# ------------------------------------------------------------
+
+# ==========================================
+#  自訂 GUI 選單系統 (雙觸發 + 多選單)
+# ==========================================
+#  觸發方式 1：蹲下時按 F (切換主副手)
+#  指令     ：/menu /選單
+#
+#  本版新增：
+#  - 玩家若在 pw_ 玩家遊戲世界中
+#  - 且是該世界創造者或共同編輯者
+#  - 主選單會顯示：取得小木斧、切換玩家模式 創造/冒險、小木斧使用教學
+#
+#  依賴：玩家遊戲世界系統.sk 內的 pw_base()、canEdit()
+# ==========================================
+
+# ==========================================
+# A. 選單內容
+# ==========================================
+
+# ----- 管理員判斷（依你的伺服器調整：OP 或權限節點）-----
+function isAdmin(p: player) :: boolean:
+    if {_p} is op:
+        return true
+    if {_p} has permission "menu.admin":
+        return true
+    return false
+
+function openMainMenu(p: player):
+    set {_inv} to chest inventory with 3 rows named "主選單"
+    set slot 0 of {_inv} to diamond named "&b傳送主城" with lore "&7移動物品傳送到出生點"
+    set slot 1 of {_inv} to white bed named "&e傳送回家" with lore "&7移動物品傳送到你的床"
+
+    # ===== 遊戲世界列表入口按鈕 =====
+    set slot 2 of {_inv} to compass named "&a遊戲世界列表" with lore "&7查看並前往遊戲世界"
+
+    # ===== 玩家遊戲世界列表入口按鈕 =====
+    set slot 3 of {_inv} to compass named "&a玩家遊戲世界列表" with lore "&7查看並前往玩家遊戲世界"
+
+    set slot 4 of {_inv} to book named "&a更多功能" with lore "&7開啟功能選單"
+
+    # ===== 玩家世界編輯功能：只有創造者 / 共同編輯者，且人在該玩家世界內才顯示 =====
+    set {_目前世界} to "%world of {_p}%"
+    if {_目前世界} contains "pw_":
+        set {_基礎世界} to pw_base({_目前世界})
+        if canEdit(name of {_p}, {_基礎世界}) is true:
+            set slot 5 of {_inv} to wooden axe named "&6取得小木斧" with lore "&7WorldEdit 選取工具" and "&8限此世界創造者或共同編輯者"
+            set slot 6 of {_inv} to iron sword named "&e切換玩家模式" with lore "&7切換創造 / 冒險模式" and "&8限此世界創造者或共同編輯者"
+            set slot 7 of {_inv} to written book named "&e小木斧使用教學" with lore "&7WorldEdit 木斧選區與常用指令" and "&8限可使用小木斧者查看"
+            set slot 8 of {_inv} to tnt named "&c刪除此世界" with lore "&7刪除你目前所在的玩家遊戲世界" and "&8/玩家遊戲世界刪除 <名稱>" and "&c此操作無法復原！"
+
+    # ===== 管理員在 game_ 遊戲世界內：顯示刪除遊戲世界（自動接在最後一個項目後一格）=====
+    delete {玩家選單GUI::遊戲世界刪除槽位::%uuid of {_p}%}
+    if {_目前世界} contains "game_":
+        if isAdmin({_p}) is true:
+            # 掃描目前已放置的項目，找出最後一格的下一格
+            set {_下一格} to 0
+            set {_掃描} to 0
+            loop 27 times:
+                if slot {_掃描} of {_inv} is not air:
+                    set {_下一格} to {_掃描} + 1
+                add 1 to {_掃描}
+            set slot {_下一格} of {_inv} to tnt named "&c刪除此遊戲世界" with lore "&7刪除你目前所在的遊戲世界" and "&8/遊戲世界刪除 <名稱>" and "&c此操作無法復原！"
+            set {玩家選單GUI::遊戲世界刪除槽位::%uuid of {_p}%} to {_下一格}
+
+    # ===== 大富翁選單入口：只要在 game_12 世界，所有玩家都看得到 =====
+    delete {玩家選單GUI::大富翁選單槽位::%uuid of {_p}%}
+    if {_目前世界} is "game_12":
+        set slot 22 of {_inv} to gold block named "&6&l🎲 大富翁選單" with lore "&7擲骰、現金、繳稅、機會、命運..." and "&8僅限大富翁地圖 game_12"
+        set {玩家選單GUI::大富翁選單槽位::%uuid of {_p}%} to 22
+
+    open {_inv} to {_p}
+
+function openFunctionMenu(p: player):
+    set {_inv} to chest inventory with 3 rows named "功能選單"
+    set slot 0 of {_inv} to paper named "&e一顆骰字" with lore "&7點擊執行 /一顆骰字"
+    set slot 1 of {_inv} to paper named "&e二顆骰字" with lore "&7點擊執行 /二顆骰字"
+    set slot 2 of {_inv} to paper named "&e三顆骰字" with lore "&7點擊執行 /三顆骰字"
+    set slot 3 of {_inv} to red stained glass pane named "&c返回" with lore "&7回到主選單"
+
+    open {_inv} to {_p}
+
+# ----- 刪除玩家世界確認選單（寶箱列表）-----
+function openDeleteWorldConfirm(p: player, worldname: text):
+    set {_inv} to chest inventory with 3 rows named "確認是否刪除 &c%{_worldname}% &r世界"
+    set slot 0 of {_inv} to red wool named "&c✔ 確認刪除" with lore "&7點擊後立即刪除此世界"
+    set slot 1 of {_inv} to lime wool named "&a✘ 取消" with lore "&7返回主選單，不刪除"
+    set {玩家選單GUI::待刪除世界::%uuid of {_p}%} to {_worldname}
+    open {_inv} to {_p}
+
+# ----- 刪除遊戲世界確認選單（寶箱列表，限管理員）-----
+function openDeleteGameWorldConfirm(p: player, worldname: text):
+    set {_inv} to chest inventory with 3 rows named "確認是否刪除 &c%{_worldname}% &r遊戲世界"
+    set slot 0 of {_inv} to red wool named "&c✔ 確認刪除" with lore "&7點擊後立即刪除此遊戲世界"
+    set slot 1 of {_inv} to lime wool named "&a✘ 取消" with lore "&7返回主選單，不刪除"
+    set {玩家選單GUI::待刪除遊戲世界::%uuid of {_p}%} to {_worldname}
+    open {_inv} to {_p}
+
+# ==========================================
+# A-2. 遊戲世界列表子選單
+#   讀取「遊戲世界管理系統」的全域變數 {遊戲世界::名稱對應::*}
+#   loop-index = 中文顯示名 / loop-value = 內部世界名 (game_N)
+# ==========================================
+
+function openWorldListMenu(p: player):
+    set {_inv} to chest inventory with 6 rows named "遊戲世界列表"
+
+    # 逐一列出所有遊戲世界，最多顯示 53 個，最後 1 格保留給返回按鈕
+    set {_i} to 0
+    loop {遊戲世界::名稱對應::*}:
+        if {_i} is smaller than 53:
+            set {_顯示名} to loop-index
+            set slot {_i} of {_inv} to grass block named "&a%{_顯示名}%" with lore "&7移動物品傳送至此世界"
+            add 1 to {_i}
+
+    # 返回按鈕放在最後一個世界選項後面的下一格
+    set {_返回槽位} to {_i}
+
+    # 完全沒有世界時，保留原本的提示位置，返回按鈕放在提示後一格
+    if {_i} is 0:
+        set slot 22 of {_inv} to barrier named "&c目前沒有任何遊戲世界" with lore "&7請聯絡管理員建立"
+        set {_返回槽位} to 23
+
+    # ===== 新增世界（僅管理員顯示）：放清單後第一格，返回放其後一格 =====
+    if isAdmin({_p}) is true:
+        set {_新增槽位} to {_返回槽位}
+        set {_返回槽位} to {_返回槽位} + 1
+        if {_返回槽位} is greater than 53:
+            set {_返回槽位} to 53
+        set slot {_新增槽位} of {_inv} to anvil named "&a➕ 新增世界" with lore "&7建立一個新的遊戲世界" and "&8/遊戲世界建立 <名稱>"
+        set {玩家選單GUI::遊戲世界新增槽位::%uuid of {_p}%} to {_新增槽位}
+    else:
+        delete {玩家選單GUI::遊戲世界新增槽位::%uuid of {_p}%}
+
+    set slot {_返回槽位} of {_inv} to red stained glass pane named "&c返回" with lore "&7回到主選單"
+    set {玩家選單GUI::世界列表返回槽位::%uuid of {_p}%} to {_返回槽位}
+    open {_inv} to {_p}
+
+# ==========================================
+# A-3. 玩家遊戲世界列表子選單
+#   讀取「玩家遊戲世界系統」的全域變數 {玩家世界::名稱對應::*}
+#   loop-index = 中文顯示名 / loop-value = 內部世界名 (pw_N)
+#   點擊世界時執行：/玩家遊戲世界列表 <世界名稱>
+# ==========================================
+
+function openPlayerWorldGuideBook(p: player):
+    # 建立虛擬成書，不放進玩家背包，直接打開
+    # 注意：不要用 set book page 1，空書一開始是 0 頁，會造成 Invalid page number (1/0)
+    # 改用 add ... to book pages of {_book} 逐頁新增，避免書無法開啟
+    set {_book} to written book named "&e玩家遊戲世界使用手冊"
+    set book title of {_book} to "玩家遊戲世界使用手冊"
+    set book author of {_book} to "rr901037"
+    add "&0&l玩家遊戲世界使用手冊%nl%%nl%&2/玩家遊戲世界建立 <名稱>%nl%&0建立自己的遊戲世界%nl%%nl%&2/玩家遊戲世界刪除 <名稱>%nl%&0刪除自己建立的世界" to book pages of {_book}
+    add "&2/玩家遊戲世界列表%nl%&0查看所有玩家遊戲世界%nl%%nl%&0基岩版玩家前往請用：%nl%&2/玩家遊戲世界列表 <世界名稱>" to book pages of {_book}
+    add "&2/玩家遊戲世界列表 <名稱>%nl%&0傳送到指定玩家世界%nl%%nl%&2/玩家遊戲世界個人模式%nl%&0切換玩家模式 創造/冒險%nl%&8限制建造者與共同編輯可用" to book pages of {_book}
+    add "&2/玩家遊戲世界共同編輯新增 <世界名> <玩家名>%nl%&0新增共同編輯者%nl%%nl%&2/玩家遊戲世界共同編輯移除 <世界名> <玩家名>%nl%&0移除共同編輯者" to book pages of {_book}
+    add "&2/玩家遊戲世界共同編輯列表 <世界名>%nl%&0查看共同編輯者%nl%%nl%&2//wand%nl%&0取得小木斧%nl%&8限共同編輯者或創造者可用" to book pages of {_book}
+    open book {_book} to {_p}
+
+function openWorldEditGuideBook(p: player):
+    # 建立虛擬成書，不放進玩家背包，直接打開
+    set {_book} to written book named "&e小木斧使用教學"
+    set book title of {_book} to "小木斧使用教學"
+    set book author of {_book} to "rr901037"
+
+    add "&0&l小木斧使用教學%nl%%nl%&0使用方法：%nl%&0若要選取長方形區域，使用木斧對方塊按左鍵為選取 A，對方塊按右鍵為選取 B。%nl%%nl%&0A、B 兩點必須是長方形對角線上的兩點。" to book pages of {_book}
+    add "&0如果要選取立體區域，也是選取立體長方體對角線上的兩點。%nl%%nl%&8示意：%nl%&0A 點：左下前角%nl%&0B 點：右上後角%nl%%nl%&0選好後即可使用 WorldEdit 指令修改選區。" to book pages of {_book}
+    add "&0&l插件指令說明%nl%%nl%&0WorldEdit 指令大多是雙斜線：&2//%nl%%nl%&0方塊 ID 可使用 Minecraft 方塊名稱，例如：%nl%&2stone%nl%&2oak_planks%nl%&2air" to book pages of {_book}
+    add "&0&l基礎限制%nl%%nl%&2//limit <數量>%nl%&0設置一次可修改的最大方塊數量。%nl%%nl%&8建議大量操作前先確認選區大小，避免伺服器卡頓。" to book pages of {_book}
+
+    add "&0&l歷史紀錄%nl%%nl%&2//undo%nl%&0復原最後一個動作。%nl%%nl%&2//redo%nl%&0還原剛剛復原的動作。%nl%%nl%&2/clearhistory%nl%&0清除 WorldEdit 歷史紀錄。" to book pages of {_book}
+    add "&0&l選取區 1%nl%%nl%&2//sel <形狀>%nl%&0選擇選區形狀。%nl%%nl%&0常見形狀：%nl%&2cuboid &0長方形%nl%&2ellipsoid &0橢圓形%nl%&2sphere &0球形" to book pages of {_book}
+    add "&0&l選取區 2%nl%%nl%&2//pos1%nl%&0選取你站的位置為 A 點。%nl%%nl%&2//pos2%nl%&0選取你站的位置為 B 點。%nl%%nl%&2//hpos1%nl%&0選取你看著的方塊為 A 點。" to book pages of {_book}
+    add "&0&l選取區 3%nl%%nl%&2//hpos2%nl%&0選取你看著的方塊為 B 點。%nl%%nl%&2//expand vert%nl%&0把選區垂直擴大到天空與基岩。%nl%%nl%&2//size%nl%&0查看選區大小。" to book pages of {_book}
+    add "&0&l選取區 4%nl%%nl%&2//count <方塊ID>%nl%&0計算選區內指定方塊數量。%nl%%nl%&2//distr%nl%&0查看選區內各方塊分布。" to book pages of {_book}
+
+    add "&0&l修改選取區 1%nl%%nl%&2//set <方塊ID>%nl%&0將選區內所有方塊改為指定方塊。%nl%&8例：//set air 可清空選區。%nl%%nl%&2//replace <A> <B>%nl%&0用 B 替換所有 A。" to book pages of {_book}
+    add "&0&l修改選取區 2%nl%%nl%&2//overlay <方塊ID>%nl%&0在選區頂部鋪上方塊。%nl%%nl%&2//walls <方塊ID>%nl%&0建立四周牆壁。%nl%%nl%&2//outline <方塊ID>%nl%&0建立牆壁、天花板、地板。" to book pages of {_book}
+    add "&0&l修改選取區 3%nl%%nl%&2//regen%nl%&0重新生成選區。%nl%%nl%&2//move <格數> <方向> <不移動方塊ID>%nl%&0移動選區內方塊。方向與排除方塊可視情況省略。" to book pages of {_book}
+    add "&0&l修改選取區 4%nl%%nl%&2//stack <格數> <方向>%nl%&0向指定方向延伸複製選區內方塊。%nl%%nl%&8方向可不填，通常會依照你面向方向。" to book pages of {_book}
+
+    add "&0&l剪貼板%nl%%nl%&2//copy%nl%&0複製選區。%nl%%nl%&2//cut%nl%&0剪下選區。%nl%%nl%&2//paste%nl%&0貼上剪貼板內容。%nl%%nl%&2/clearclipboard%nl%&0清除剪貼板。" to book pages of {_book}
+    add "&0&l旋轉與翻轉%nl%%nl%&2//rotate <角度>%nl%&0旋轉剪貼板內容，例如 90、180。%nl%%nl%&2//flip%nl%&0翻轉剪貼板內容。%nl%%nl%&8需先 //copy，再旋轉或翻轉，最後 //paste。" to book pages of {_book}
+
+    add "&0&l創建 1%nl%%nl%&2//hcyl <方塊ID> <半徑> <高>%nl%&0創建垂直空心圓柱。%nl%%nl%&2//cyl <方塊ID> <半徑> <高>%nl%&0創建垂直實心圓柱。" to book pages of {_book}
+    add "&0&l創建 2%nl%%nl%&2//sphere <方塊ID> <半徑>%nl%&0創建實心球體。%nl%%nl%&2//hsphere <方塊ID> <半徑>%nl%&0創建空心球體。" to book pages of {_book}
+    add "&0&l創建 3%nl%%nl%&2/forestgen <大小> <類型> <密度>%nl%&0以你為中心創建森林。%nl%%nl%&2/pumpkins <大小>%nl%&0以你為中心生成南瓜森林。" to book pages of {_book}
+
+    add "&0&l其他指令 1%nl%%nl%&2//fill <方塊ID> <半徑> <深度>%nl%&0填補一個洞。%nl%%nl%&2//drain <半徑>%nl%&0移除半徑內的水或岩漿。" to book pages of {_book}
+    add "&0&l其他指令 2%nl%%nl%&2/fixwater <半徑>%nl%&0整理流水，減少亂流。%nl%%nl%&2/removeabove <大小> <高度>%nl%&0刪除你上方指定範圍方塊。%nl%%nl%&2/removebelow <大小> <高度>%nl%&0刪除你下方指定範圍方塊。" to book pages of {_book}
+    add "&0&l其他指令 3%nl%%nl%&2/snow <半徑>%nl%&0模擬降雪。%nl%%nl%&2/thaw <半徑>%nl%&0解凍。%nl%%nl%&2/remove snow <半徑>%nl%&0清除雪。%nl%%nl%&2//ex <半徑>%nl%&0滅火。" to book pages of {_book}
+    add "&0&l其他指令 4%nl%%nl%&2/butcher <半徑>%nl%&0殺死附近怪物。%nl%%nl%&2/remove <物品名稱> <半徑>%nl%&0刪除附近實體物。%nl%&8例：arrows、boats、minecarts、tnt" to book pages of {_book}
+    add "&0&l插件與指南針%nl%%nl%&2使用指南針按右鍵%nl%&0可穿牆傳送。" to book pages of {_book}
+    # add "&0&l插件與指南針%nl%%nl%&2//worldedit version%nl%&0查看 WorldEdit 版本。%nl%%nl%&2//worldedit reload%nl%&0重載 WorldEdit。%nl%%nl%&2使用指南針按右鍵%nl%&0可穿牆傳送。" to book pages of {_book}
+
+    open book {_book} to {_p}
+
+function openPlayerWorldListMenu(p: player):
+    set {_inv} to chest inventory with 6 rows named "玩家遊戲世界列表"
+
+    # 第 1 格放玩家遊戲世界使用手冊，點擊後會自動打開書本
+    set slot 0 of {_inv} to written book named "&e玩家遊戲世界使用手冊" with lore "&7移動物品打開使用手冊"
+
+    # 逐一列出所有玩家遊戲世界，slot 0 保留給使用手冊，最多顯示 52 個，最後 1 格保留給返回按鈕
+    set {_i} to 1
+    loop {玩家世界::名稱對應::*}:
+        if {_i} is smaller than 53:
+            set {_顯示名} to loop-index
+            set {_內部名} to loop-value
+            set {_創造者} to {玩家世界::創造者::%{_內部名}%} ? "未知"
+            set {_次數} to {玩家世界::訪問次數::%{_內部名}%} ? 0
+            set {_人數} to {玩家世界::訪問玩家數::%{_內部名}%} ? 0
+            set slot {_i} of {_inv} to grass block named "&a%{_顯示名}%" with lore "&7創造者: &b%{_創造者}% &7- 訪問: &e%{_次數}% &7次 / &e%{_人數}% &7人" and "&7移動物品傳送至此玩家世界"
+            add 1 to {_i}
+
+    # 返回按鈕放在最後一個世界選項後面的下一格
+    set {_返回槽位} to {_i}
+
+    # 完全沒有世界時，放提示，返回按鈕放在提示後一格
+    if {_i} is 1:
+        set slot 22 of {_inv} to barrier named "&c目前沒有任何玩家遊戲世界" with lore "&7請使用 /玩家遊戲世界建立 <名稱> 建立"
+        set {_返回槽位} to 23
+
+    # ===== 新增世界（清單後第一格）與 返回（其後一格）位置已對調 =====
+    set {_新增槽位} to {_返回槽位}
+    set {_返回槽位} to {_返回槽位} + 1
+    if {_返回槽位} is greater than 53:
+        set {_返回槽位} to 53
+
+    set slot {_新增槽位} of {_inv} to anvil named "&a➕ 新增世界" with lore "&7建立一個新的玩家遊戲世界" and "&8/玩家遊戲世界建立 <名稱>"
+    set {玩家選單GUI::玩家世界新增槽位::%uuid of {_p}%} to {_新增槽位}
+
+    set slot {_返回槽位} of {_inv} to red stained glass pane named "&c返回" with lore "&7回到主選單"
+    set {玩家選單GUI::玩家世界列表返回槽位::%uuid of {_p}%} to {_返回槽位}
+
+    open {_inv} to {_p}
+
+# ==========================================
+# B. 觸發方式
+# ==========================================
+
+on swap hand items:
+    if player is sneaking:
+        cancel event
+        openMainMenu(player)
+
+command /menu:
+    trigger:
+        openMainMenu(player)
+
+command /選單:
+    trigger:
+        openMainMenu(player)
+
+# ==========================================
+# C. 點擊事件處理
+# ==========================================
+on inventory click:
+
+    # ----- 主選單 -----
+    if name of event-inventory is "主選單":
+        cancel event
+        if clicked inventory is event-inventory:
+            if clicked slot is 0:
+                close player's inventory
+                send "&a[系統] 正在將你傳送到主城..." to player
+                execute player command "/spawn"
+
+            else if clicked slot is 1:
+                close player's inventory
+                execute player command "/home"
+
+            else if clicked slot is 2:
+                # 開啟遊戲世界列表
+                wait 1 tick
+                openWorldListMenu(player)
+
+            else if clicked slot is 3:
+                # 開啟玩家遊戲世界列表
+                wait 1 tick
+                openPlayerWorldListMenu(player)
+
+            else if clicked slot is 4:
+                # 更多功能
+                wait 1 tick
+                openFunctionMenu(player)
+
+            else if clicked slot is {玩家選單GUI::遊戲世界刪除槽位::%uuid of player%}:
+                # 刪除此遊戲世界（限管理員，按鈕位置為動態，故用記錄的槽位判斷）
+                if isAdmin(player) is false:
+                    close player's inventory
+                    send "&c你沒有權限刪除遊戲世界！" to player
+                    stop
+
+                set {_目前世界} to "%player's world%"
+                if {_目前世界} does not contain "game_":
+                    close player's inventory
+                    send "&c此功能只能在遊戲世界中使用！" to player
+                    stop
+
+                delete {_中文名}
+                loop {遊戲世界::名稱對應::*}:
+                    if loop-value is {_目前世界}:
+                        set {_中文名} to loop-index
+                if {_中文名} is not set:
+                    close player's inventory
+                    send "&c找不到此遊戲世界的名稱資料，無法刪除。" to player
+                    stop
+
+                close player's inventory
+                wait 1 tick
+                openDeleteGameWorldConfirm(player, {_中文名})
+
+            else if clicked slot is {玩家選單GUI::大富翁選單槽位::%uuid of player%}:
+                # 開啟大富翁選單(僅 game_12，所有玩家可用)
+                wait 1 tick
+                openMonopolyMenu(player)
+
+            else if clicked slot is 5:
+                # 取得小木斧：再次檢查權限，避免玩家用漏洞點擊不存在的按鈕
+                set {_目前世界} to "%player's world%"
+                if {_目前世界} does not contain "pw_":
+                    close player's inventory
+                    send "&c此功能只能在玩家遊戲世界中使用！" to player
+                    stop
+
+                set {_基礎世界} to pw_base({_目前世界})
+                if canEdit(player's name, {_基礎世界}) is false:
+                    close player's inventory
+                    send "&c你不是此世界的創造者或共同編輯者！" to player
+                    stop
+
+                give 1 wooden axe named "&6WorldEdit 小木斧" to player
+                close player's inventory
+                send "&a✔ 你已取得小木斧，可用於 WorldEdit 選取範圍。" to player
+
+            else if clicked slot is 6:
+                # 切換玩家模式：再次檢查權限，並交給玩家遊戲世界系統原本的指令處理
+                set {_目前世界} to "%player's world%"
+                if {_目前世界} does not contain "pw_":
+                    close player's inventory
+                    send "&c此功能只能在玩家遊戲世界中使用！" to player
+                    stop
+
+                set {_基礎世界} to pw_base({_目前世界})
+                if canEdit(player's name, {_基礎世界}) is false:
+                    close player's inventory
+                    send "&c你不是此世界的創造者或共同編輯者！" to player
+                    stop
+
+                close player's inventory
+                execute player command "/玩家遊戲世界個人模式"
+
+            else if clicked slot is 7:
+                # 小木斧使用教學：與取得小木斧使用同一組權限檢查
+                set {_目前世界} to "%player's world%"
+                if {_目前世界} does not contain "pw_":
+                    close player's inventory
+                    send "&c此功能只能在玩家遊戲世界中使用！" to player
+                    stop
+
+                set {_基礎世界} to pw_base({_目前世界})
+                if canEdit(player's name, {_基礎世界}) is false:
+                    close player's inventory
+                    send "&c你不是此世界的創造者或共同編輯者！" to player
+                    stop
+
+                close player's inventory
+                wait 1 tick
+                openWorldEditGuideBook(player)
+
+            else if clicked slot is 8:
+                # 刪除此玩家世界（固定 slot 8）
+                set {_目前世界} to "%player's world%"
+                if {_目前世界} contains "pw_":
+                    set {_基礎世界} to pw_base({_目前世界})
+                    if canEdit(player's name, {_基礎世界}) is false:
+                        close player's inventory
+                        send "&c你不是此世界的創造者或共同編輯者！" to player
+                        stop
+
+                    delete {_中文名}
+                    loop {玩家世界::名稱對應::*}:
+                        if loop-value is {_基礎世界}:
+                            set {_中文名} to loop-index
+                    if {_中文名} is not set:
+                        close player's inventory
+                        send "&c找不到此世界的名稱資料，無法刪除。" to player
+                        stop
+
+                    close player's inventory
+                    wait 1 tick
+                    openDeleteWorldConfirm(player, {_中文名})
+
+    # ----- 功能選單 -----
+    if name of event-inventory is "功能選單":
+        cancel event
+        if clicked inventory is event-inventory:
+            if clicked slot is 0:
+                close player's inventory
+                execute player command "/一顆骰字"
+
+            else if clicked slot is 1:
+                close player's inventory
+                execute player command "/二顆骰字"
+
+            else if clicked slot is 2:
+                close player's inventory
+                execute player command "/三顆骰字"
+
+            else if clicked slot is 3:
+                wait 1 tick
+                openMainMenu(player)
+
+    # ----- 遊戲世界列表 -----
+    if name of event-inventory is "遊戲世界列表":
+        cancel event
+        if clicked inventory is event-inventory:
+            if clicked slot is {玩家選單GUI::世界列表返回槽位::%uuid of player%}:
+                # 返回主選單
+                wait 1 tick
+                openMainMenu(player)
+
+            else if clicked slot is {玩家選單GUI::遊戲世界新增槽位::%uuid of player%}:
+                # 新增遊戲世界（僅管理員）：再次驗證權限後開啟鐵砧輸入
+                if isAdmin(player) is false:
+                    close player's inventory
+                    send "&c你沒有權限建立遊戲世界！" to player
+                    stop
+                close player's inventory
+                wait 1 tick
+                openAnvilInput(player, "game_create", "", "輸入遊戲世界名稱")
+
+            else:
+                # 用「點到第幾格」對回同順序的世界清單
+                set {_j} to 0
+                loop {遊戲世界::名稱對應::*}:
+                    if {_j} is clicked slot:
+                        set {_名稱} to loop-index
+                    add 1 to {_j}
+
+                # 有對到世界才傳送
+                if {_名稱} is set:
+                    close player's inventory
+                    execute player command "/遊戲世界列表 %{_名稱}%"
+
+    # ----- 玩家遊戲世界列表 -----
+    if name of event-inventory is "玩家遊戲世界列表":
+        cancel event
+        if clicked inventory is event-inventory:
+            if clicked slot is {玩家選單GUI::玩家世界列表返回槽位::%uuid of player%}:
+                # 返回主選單
+                wait 1 tick
+                openMainMenu(player)
+
+            else if clicked slot is 0:
+                # 打開玩家遊戲世界使用手冊
+                close player's inventory
+                wait 1 tick
+                openPlayerWorldGuideBook(player)
+
+            else if clicked slot is {玩家選單GUI::玩家世界新增槽位::%uuid of player%}:
+                # 新增世界：開啟鐵砧輸入框，輸入完成後由「on anvil input」執行建立指令
+                close player's inventory
+                wait 1 tick
+                openAnvilInput(player, "pw_create", "", "輸入玩家遊戲世界名稱")
+
+            else:
+                # 用「點到第幾格」對回同順序的玩家世界清單
+                # slot 0 是說明書，所以玩家世界從 slot 1 開始
+                set {_j} to 1
+                loop {玩家世界::名稱對應::*}:
+                    if {_j} is clicked slot:
+                        set {_名稱} to loop-index
+                    add 1 to {_j}
+
+                # 有對到世界才傳送
+                if {_名稱} is set:
+                    close player's inventory
+                    execute player command "/玩家遊戲世界列表 %{_名稱}%"
+
+    # ----- 確認刪除（玩家世界 / 遊戲世界共用，標題含世界名故用 contains 判斷）-----
+    if name of event-inventory contains "確認是否刪除":
+        cancel event
+        if clicked inventory is event-inventory:
+            if clicked slot is 0:
+                # 確認刪除：依待刪除變數判斷是遊戲世界還是玩家世界
+                if {玩家選單GUI::待刪除遊戲世界::%uuid of player%} is set:
+                    set {_中文名} to {玩家選單GUI::待刪除遊戲世界::%uuid of player%}
+                    if isAdmin(player) is false:
+                        close player's inventory
+                        send "&c你沒有權限刪除遊戲世界！" to player
+                        delete {玩家選單GUI::待刪除遊戲世界::%uuid of player%}
+                        stop
+                    delete {玩家選單GUI::待刪除遊戲世界::%uuid of player%}
+                    close player's inventory
+                    send "&e正在刪除遊戲世界：&f%{_中文名}%&e..." to player
+                    execute player command "/遊戲世界刪除 %{_中文名}%"
+
+                else if {玩家選單GUI::待刪除世界::%uuid of player%} is set:
+                    set {_中文名} to {玩家選單GUI::待刪除世界::%uuid of player%}
+                    set {_基礎世界} to {玩家世界::名稱對應::%{_中文名}%}
+                    if {_基礎世界} is not set:
+                        close player's inventory
+                        send "&c找不到此世界，已取消刪除。" to player
+                        delete {玩家選單GUI::待刪除世界::%uuid of player%}
+                        stop
+                    if canEdit(player's name, {_基礎世界}) is false:
+                        close player's inventory
+                        send "&c你沒有權限刪除此世界！" to player
+                        delete {玩家選單GUI::待刪除世界::%uuid of player%}
+                        stop
+                    delete {玩家選單GUI::待刪除世界::%uuid of player%}
+                    close player's inventory
+                    send "&e正在刪除世界：&f%{_中文名}%&e..." to player
+                    execute player command "/玩家遊戲世界刪除 %{_中文名}%"
+
+            else if clicked slot is 1:
+                # 取消 → 返回主選單
+                delete {玩家選單GUI::待刪除世界::%uuid of player%}
+                delete {玩家選單GUI::待刪除遊戲世界::%uuid of player%}
+                wait 1 tick
+                openMainMenu(player)
+
+# ==========================================
+# D. 拖曳事件處理
+# ==========================================
+on inventory drag:
+    if name of event-inventory is "主選單":
+        cancel event
+    if name of event-inventory is "功能選單":
+        cancel event
+    if name of event-inventory is "遊戲世界列表":
+        cancel event
+    if name of event-inventory is "玩家遊戲世界列表":
+        cancel event
+    if name of event-inventory contains "確認是否刪除":
+        cancel event
+
+# ==========================================
+# E. 鐵砧輸入回呼：建立玩家世界
+#   依賴 anvil_input(_api).sk 內的：
+#     openAnvilInput()、on anvil input、anvilText()、anvilId()
+#   流程：點「➕ 新增世界」→ 鐵砧輸入名稱 → 確認後執行 /玩家遊戲世界建立 <名稱>
+# ==========================================
+on anvil input:
+    set {_id} to anvilId(player)
+    set {_名稱} to anvilText(player)
+    if {_名稱} is "":
+        stop
+    if {_id} is "pw_create":
+        execute player command "/玩家遊戲世界建立 %{_名稱}%"
+    else if {_id} is "game_create":
+        execute player command "/遊戲世界建立 %{_名稱}%"
+
+# ==========================================
+# F. 大富翁選單（搭配 大富翁小幫手.sk，僅 game_12）
+#    所有玩家皆可使用；開始遊戲 / 銀行 僅管理員顯示與可用
+#    按鈕實際執行對應指令(使用英文別名，避免中文指令相容性問題)
+# ==========================================
+
+function openMonopolyMenu(p: player):
+    set {_inv} to chest inventory with 3 rows named "大富翁選單"
+    # 第一排：基本動作
+    set slot 0 of {_inv} to snowball named "&b🎲 擲骰子" with lore "&7擲兩顆骰子"
+    set slot 1 of {_inv} to gold ingot named "&e💰 查看現金" with lore "&7查看自己目前的現金"
+    set slot 2 of {_inv} to paper named "&a🏆 現金排行榜" with lore "&7查看在場玩家現金排行"
+    set slot 3 of {_inv} to lime concrete named "&a🏁 通過起點" with lore "&7領取過路費"
+    set slot 4 of {_inv} to gold nugget named "&e💸 付錢給玩家" with lore "&7付租金/過路費給其他玩家"
+    # 第二排：稅 / 機會 / 命運 / 說明
+    set slot 9 of {_inv} to iron ingot named "&c🧾 繳所得稅" with lore "&7繳交所得稅"
+    set slot 10 of {_inv} to diamond named "&b💎 繳奢侈稅" with lore "&7繳交奢侈稅"
+    set slot 11 of {_inv} to chest named "&6❓ 抽機會" with lore "&7抽一張機會卡"
+    set slot 12 of {_inv} to ender chest named "&5❗ 抽命運" with lore "&7抽一張命運卡"
+    set slot 13 of {_inv} to book named "&f📖 指令說明" with lore "&7顯示所有大富翁指令"
+    # 第三排：管理員功能
+    if isAdmin({_p}) is true:
+        set slot 18 of {_inv} to emerald block named "&a🎮 開始遊戲" with lore "&7發放起始資金給全場玩家" and "&8限管理員"
+        set slot 19 of {_inv} to gold block named "&6🏦 銀行操作" with lore "&7給/收/設定玩家現金" and "&8限管理員"
+    # 返回
+    set slot 26 of {_inv} to red stained glass pane named "&c返回" with lore "&7回到主選單"
+    open {_inv} to {_p}
+
+# ----- 銀行子選單（限管理員）-----
+function openDfwBankMenu(p: player):
+    set {_inv} to chest inventory with 3 rows named "大富翁銀行"
+    set slot 0 of {_inv} to lime concrete named "&a給玩家錢" with lore "&7銀行發錢給某玩家"
+    set slot 1 of {_inv} to red concrete named "&c向玩家收錢" with lore "&7銀行向某玩家收錢"
+    set slot 2 of {_inv} to yellow concrete named "&e設定玩家金額" with lore "&7直接設定某玩家現金"
+    set slot 8 of {_inv} to red stained glass pane named "&c返回" with lore "&7回到大富翁選單"
+    open {_inv} to {_p}
+
+# ----- 選擇玩家子選單（付錢 / 銀行 共用）-----
+#   purpose: "pay" / "bank_give" / "bank_take" / "bank_set"
+function openDfwPlayerPick(p: player, purpose: text):
+    set {_inv} to chest inventory with 6 rows named "大富翁選擇玩家"
+    set {dfw::gui::purpose::%uuid of {_p}%} to {_purpose}
+    delete {dfw::gui::picklist::%uuid of {_p}%::*}
+    set {_i} to 0
+    loop all players:
+        if "%world of loop-player%" is "game_12":
+            set {_skip} to false
+            if {_purpose} is "pay":
+                if loop-player is {_p}:
+                    set {_skip} to true
+            if {_skip} is false:
+                if {_i} is smaller than 53:
+                    set slot {_i} of {_inv} to name tag named "&a%loop-player%" with lore "&7點擊選擇此玩家"
+                    set {dfw::gui::picklist::%uuid of {_p}%::%{_i}%} to "%loop-player%"
+                    add 1 to {_i}
+    set {_ret} to {_i}
+    if {_ret} is 0:
+        set slot 22 of {_inv} to barrier named "&c目前沒有其他在場玩家"
+        set {_ret} to 23
+    if {_ret} is greater than 53:
+        set {_ret} to 53
+    set slot {_ret} of {_inv} to red stained glass pane named "&c返回" with lore "&7回到大富翁選單"
+    set {dfw::gui::pickreturn::%uuid of {_p}%} to {_ret}
+    open {_inv} to {_p}
+
+# ==========================================
+# F-2. 大富翁選單點擊事件
+# ==========================================
+on inventory click:
+    # ----- 大富翁選單 -----
+    if name of event-inventory is "大富翁選單":
+        cancel event
+        if clicked inventory is event-inventory:
+            if "%player's world%" is not "game_12":
+                close player's inventory
+                send "&c此選單僅能在大富翁地圖(game_12)使用！" to player
+                stop
+            if clicked slot is 0:
+                close player's inventory
+                execute player command "/roll"
+            else if clicked slot is 1:
+                close player's inventory
+                execute player command "/money"
+            else if clicked slot is 2:
+                close player's inventory
+                execute player command "/moneytop"
+            else if clicked slot is 3:
+                close player's inventory
+                execute player command "/passgo"
+            else if clicked slot is 4:
+                wait 1 tick
+                openDfwPlayerPick(player, "pay")
+            else if clicked slot is 9:
+                close player's inventory
+                execute player command "/tax income"
+            else if clicked slot is 10:
+                close player's inventory
+                execute player command "/tax luxury"
+            else if clicked slot is 11:
+                close player's inventory
+                execute player command "/chance"
+            else if clicked slot is 12:
+                close player's inventory
+                execute player command "/fate"
+            else if clicked slot is 13:
+                close player's inventory
+                execute player command "/dfwhelp"
+            else if clicked slot is 18:
+                if isAdmin(player) is false:
+                    close player's inventory
+                    send "&c只有管理員可以使用此功能！" to player
+                    stop
+                close player's inventory
+                execute player command "/dfwstart"
+            else if clicked slot is 19:
+                if isAdmin(player) is false:
+                    close player's inventory
+                    send "&c只有管理員可以使用此功能！" to player
+                    stop
+                wait 1 tick
+                openDfwBankMenu(player)
+            else if clicked slot is 26:
+                wait 1 tick
+                openMainMenu(player)
+
+    # ----- 大富翁銀行 -----
+    if name of event-inventory is "大富翁銀行":
+        cancel event
+        if clicked inventory is event-inventory:
+            if isAdmin(player) is false:
+                close player's inventory
+                send "&c只有管理員可以使用銀行功能！" to player
+                stop
+            if clicked slot is 0:
+                wait 1 tick
+                openDfwPlayerPick(player, "bank_give")
+            else if clicked slot is 1:
+                wait 1 tick
+                openDfwPlayerPick(player, "bank_take")
+            else if clicked slot is 2:
+                wait 1 tick
+                openDfwPlayerPick(player, "bank_set")
+            else if clicked slot is 8:
+                wait 1 tick
+                openMonopolyMenu(player)
+
+    # ----- 大富翁選擇玩家 -----
+    if name of event-inventory is "大富翁選擇玩家":
+        cancel event
+        if clicked inventory is event-inventory:
+            if clicked slot is {dfw::gui::pickreturn::%uuid of player%}:
+                wait 1 tick
+                openMonopolyMenu(player)
+            else:
+                set {_target} to {dfw::gui::picklist::%uuid of player%::%clicked slot%}
+                if {_target} is set:
+                    set {_purpose} to {dfw::gui::purpose::%uuid of player%}
+                    close player's inventory
+                    wait 1 tick
+                    if {_purpose} is "pay":
+                        openAnvilInput(player, "dfw_pay:%{_target}%", "", "輸入要付給 %{_target}% 的金額")
+                    else if {_purpose} is "bank_give":
+                        openAnvilInput(player, "dfw_bank:give:%{_target}%", "", "給 %{_target}% 多少錢")
+                    else if {_purpose} is "bank_take":
+                        openAnvilInput(player, "dfw_bank:take:%{_target}%", "", "向 %{_target}% 收多少錢")
+                    else if {_purpose} is "bank_set":
+                        openAnvilInput(player, "dfw_bank:set:%{_target}%", "", "把 %{_target}% 的現金設定為")
+
+# ==========================================
+# F-3. 大富翁選單拖曳事件（一律取消）
+# ==========================================
+on inventory drag:
+    if name of event-inventory is "大富翁選單":
+        cancel event
+    if name of event-inventory is "大富翁銀行":
+        cancel event
+    if name of event-inventory is "大富翁選擇玩家":
+        cancel event
+
+# ==========================================
+# F-4. 大富翁鐵砧輸入回呼（付錢 / 銀行金額）
+#   依賴 anvil_input(_api).sk 的 openAnvilInput / on anvil input / anvilId / anvilText
+# ==========================================
+on anvil input:
+    set {_id} to anvilId(player)
+    set {_text} to anvilText(player)
+    if {_id} contains "dfw_pay:":
+        set {_parts::*} to {_id} split at ":"
+        set {_target} to {_parts::2}
+        set {_n} to {_text} parsed as integer
+        if {_n} is not set:
+            send "&c金額必須是數字！" to player
+            stop
+        execute player command "/pay %{_target}% %{_n}%"
+    else if {_id} contains "dfw_bank:":
+        set {_parts::*} to {_id} split at ":"
+        set {_action} to {_parts::2}
+        set {_target} to {_parts::3}
+        set {_n} to {_text} parsed as integer
+        if {_n} is not set:
+            send "&c金額必須是數字！" to player
+            stop
+        if {_action} is "give":
+            execute player command "/bank give %{_target}% %{_n}%"
+        else if {_action} is "take":
+            execute player command "/bank take %{_target}% %{_n}%"
+        else if {_action} is "set":
+            execute player command "/bank set %{_target}% %{_n}%"

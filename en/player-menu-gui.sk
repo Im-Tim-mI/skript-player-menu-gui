@@ -1,0 +1,765 @@
+# ------------------------------------------------------------
+#  skript-player-menu-gui (English edition)
+#  https://github.com/Im-Tim-mI/skript-player-menu-gui
+#  Copyright (c) 2026 廷廷小教室、廷廷的家（Tim945）
+#  License: MIT + Commons Clause (see LICENSE)
+# ------------------------------------------------------------
+
+# ==========================================
+#  Custom GUI menu system (two triggers + several menus)
+# ==========================================
+#  Trigger 1: press F (swap hands) while sneaking
+#  Command  : /menu
+#
+#  New in this version:
+#  - If the player is in a pw_ player game world
+#  - and is the creator or a co-editor of that world,
+#  - the main menu also shows: Get Wooden Axe, Toggle Game Mode (creative / adventure), Wooden Axe Guide
+#
+#  Depends on: pw_base() and canEdit() from player-game-worlds.sk
+# ==========================================
+
+# ==========================================
+# A. Menu contents
+# ==========================================
+
+# ----- Admin check (adjust for your server: OP or a permission node) -----
+function isAdmin(p: player) :: boolean:
+    if {_p} is op:
+        return true
+    if {_p} has permission "menu.admin":
+        return true
+    return false
+
+function openMainMenu(p: player):
+    set {_inv} to chest inventory with 3 rows named "Main Menu"
+    set slot 0 of {_inv} to diamond named "&bTeleport to Spawn" with lore "&7Click to teleport to spawn"
+    set slot 1 of {_inv} to white bed named "&eTeleport Home" with lore "&7Click to teleport to your bed"
+
+    # ===== Game world list button =====
+    set slot 2 of {_inv} to compass named "&aGame Worlds" with lore "&7Browse and visit the game worlds"
+
+    # ===== Player game world list button =====
+    set slot 3 of {_inv} to compass named "&aPlayer Worlds" with lore "&7Browse and visit the player game worlds"
+
+    set slot 4 of {_inv} to book named "&aMore Features" with lore "&7Open the features menu"
+
+    # ===== Player world editing tools: only shown to the creator / co-editors while they are inside that player world =====
+    set {_currentWorld} to "%world of {_p}%"
+    if {_currentWorld} contains "pw_":
+        set {_baseWorld} to pw_base({_currentWorld})
+        if canEdit(name of {_p}, {_baseWorld}) is true:
+            set slot 5 of {_inv} to wooden axe named "&6Get Wooden Axe" with lore "&7WorldEdit selection tool" and "&8Only for this world's creator or co-editors"
+            set slot 6 of {_inv} to iron sword named "&eToggle Game Mode" with lore "&7Switch between creative / adventure" and "&8Only for this world's creator or co-editors"
+            set slot 7 of {_inv} to written book named "&eWooden Axe Guide" with lore "&7WorldEdit selections and common commands" and "&8Only for players who can use the wooden axe"
+            set slot 8 of {_inv} to tnt named "&cDelete This World" with lore "&7Delete the player game world you are in" and "&8/pwdelete <name>" and "&cThis cannot be undone!"
+
+    # ===== Admins inside a game_ world: show "Delete This Game World" (placed right after the last item) =====
+    delete {playermenu::gwDeleteSlot::%uuid of {_p}%}
+    if {_currentWorld} contains "game_":
+        if isAdmin({_p}) is true:
+            # Scan the items placed so far and find the slot after the last one
+            set {_nextSlot} to 0
+            set {_scan} to 0
+            loop 27 times:
+                if slot {_scan} of {_inv} is not air:
+                    set {_nextSlot} to {_scan} + 1
+                add 1 to {_scan}
+            set slot {_nextSlot} of {_inv} to tnt named "&cDelete This Game World" with lore "&7Delete the game world you are in" and "&8/gwdelete <name>" and "&cThis cannot be undone!"
+            set {playermenu::gwDeleteSlot::%uuid of {_p}%} to {_nextSlot}
+
+    # ===== Monopoly menu button: visible to every player inside game_12 =====
+    delete {playermenu::monopolySlot::%uuid of {_p}%}
+    if {_currentWorld} is "game_12":
+        set slot 22 of {_inv} to gold block named "&6&l🎲 Monopoly Menu" with lore "&7Dice, cash, taxes, Chance, Fate..." and "&8Monopoly map game_12 only"
+        set {playermenu::monopolySlot::%uuid of {_p}%} to 22
+
+    open {_inv} to {_p}
+
+function openFunctionMenu(p: player):
+    set {_inv} to chest inventory with 3 rows named "More Features"
+    set slot 0 of {_inv} to paper named "&eRoll 1 Die" with lore "&7Click to run /dice1"
+    set slot 1 of {_inv} to paper named "&eRoll 2 Dice" with lore "&7Click to run /dice2"
+    set slot 2 of {_inv} to paper named "&eRoll 3 Dice" with lore "&7Click to run /dice3"
+    set slot 3 of {_inv} to red stained glass pane named "&cBack" with lore "&7Back to the main menu"
+
+    open {_inv} to {_p}
+
+# ----- Delete player world confirmation (chest menu) -----
+function openDeleteWorldConfirm(p: player, worldname: text):
+    set {_inv} to chest inventory with 3 rows named "Confirm: delete world &c%{_worldname}%"
+    set slot 0 of {_inv} to red wool named "&c✔ Confirm Delete" with lore "&7Deletes this world right away"
+    set slot 1 of {_inv} to lime wool named "&a✘ Cancel" with lore "&7Back to the main menu without deleting"
+    set {playermenu::pendingDeleteWorld::%uuid of {_p}%} to {_worldname}
+    open {_inv} to {_p}
+
+# ----- Delete game world confirmation (chest menu, admins only) -----
+function openDeleteGameWorldConfirm(p: player, worldname: text):
+    set {_inv} to chest inventory with 3 rows named "Confirm: delete game world &c%{_worldname}%"
+    set slot 0 of {_inv} to red wool named "&c✔ Confirm Delete" with lore "&7Deletes this game world right away"
+    set slot 1 of {_inv} to lime wool named "&a✘ Cancel" with lore "&7Back to the main menu without deleting"
+    set {playermenu::pendingDeleteGameWorld::%uuid of {_p}%} to {_worldname}
+    open {_inv} to {_p}
+
+# ==========================================
+# A-2. Game world list submenu
+#   Reads the global variable {gameworld::name2id::*} from game-world-manager.sk
+#   loop-index = display name / loop-value = internal world name (game_N)
+# ==========================================
+
+function openWorldListMenu(p: player):
+    set {_inv} to chest inventory with 6 rows named "Game Worlds"
+
+    # List every game world, at most 53, keeping the last slot for the back button
+    set {_i} to 0
+    loop {gameworld::name2id::*}:
+        if {_i} is smaller than 53:
+            set {_display} to loop-index
+            set slot {_i} of {_inv} to grass block named "&a%{_display}%" with lore "&7Click to teleport to this world"
+            add 1 to {_i}
+
+    # The back button goes into the slot right after the last world
+    set {_backSlot} to {_i}
+
+    # No worlds at all: keep the old hint position and put the back button right after the hint
+    if {_i} is 0:
+        set slot 22 of {_inv} to barrier named "&cThere are no game worlds yet" with lore "&7Please ask an admin to create one"
+        set {_backSlot} to 23
+
+    # ===== New World (admins only): first slot after the list, back button right after it =====
+    if isAdmin({_p}) is true:
+        set {_addSlot} to {_backSlot}
+        set {_backSlot} to {_backSlot} + 1
+        if {_backSlot} is greater than 53:
+            set {_backSlot} to 53
+        set slot {_addSlot} of {_inv} to anvil named "&a➕ New World" with lore "&7Create a new game world" and "&8/gwcreate <name>"
+        set {playermenu::gwAddSlot::%uuid of {_p}%} to {_addSlot}
+    else:
+        delete {playermenu::gwAddSlot::%uuid of {_p}%}
+
+    set slot {_backSlot} of {_inv} to red stained glass pane named "&cBack" with lore "&7Back to the main menu"
+    set {playermenu::gwBackSlot::%uuid of {_p}%} to {_backSlot}
+    open {_inv} to {_p}
+
+# ==========================================
+# A-3. Player game world list submenu
+#   Reads the global variable {playerworld::name2id::*} from player-game-worlds.sk
+#   loop-index = display name / loop-value = internal world name (pw_N)
+#   Clicking a world runs: /pwlist <world name>
+# ==========================================
+
+function openPlayerWorldGuideBook(p: player):
+    # Build a virtual written book and open it directly without putting it in the inventory
+    # Note: don't use "set book page 1" - an empty book starts with 0 pages and throws "Invalid page number (1/0)"
+    # Add the pages one by one with "add ... to book pages of {_book}" instead, otherwise the book won't open
+    set {_book} to written book named "&ePlayer World Guide"
+    set book title of {_book} to "Player World Guide"
+    set book author of {_book} to "rr901037"
+    add "&0&lPlayer World Guide%nl%%nl%&2/pwcreate <name>%nl%&0Create your own game world%nl%%nl%&2/pwdelete <name>%nl%&0Delete a world you created" to book pages of {_book}
+    add "&2/pwlist%nl%&0List all player game worlds%nl%%nl%&0Bedrock players can travel with:%nl%&2/pwlist <world name>" to book pages of {_book}
+    add "&2/pwlist <name>%nl%&0Teleport to that player world%nl%%nl%&2/pwmode%nl%&0Toggle creative / adventure%nl%&8Creators and co-editors only" to book pages of {_book}
+    add "&2/pwaddeditor <world> <player>%nl%&0Add a co-editor%nl%%nl%&2/pwremoveeditor <world> <player>%nl%&0Remove a co-editor" to book pages of {_book}
+    add "&2/pweditors <world>%nl%&0List the co-editors%nl%%nl%&2//wand%nl%&0Get the wooden axe%nl%&8Co-editors and creators only" to book pages of {_book}
+    open book {_book} to {_p}
+
+function openWorldEditGuideBook(p: player):
+    # Build a virtual written book and open it directly without putting it in the inventory
+    set {_book} to written book named "&eWooden Axe Guide"
+    set book title of {_book} to "Wooden Axe Guide"
+    set book author of {_book} to "rr901037"
+
+    add "&0&lWooden Axe Guide%nl%%nl%&0How to use:%nl%&0Left-click a block with the wooden axe to set point A, right-click a block to set point B.%nl%%nl%&0A and B must be opposite corners of the box." to book pages of {_book}
+    add "&0For a 3D area, also pick two opposite corners of the box.%nl%%nl%&8Example:%nl%&0A: bottom-left-front%nl%&0B: top-right-back%nl%%nl%&0Then edit the selection with WorldEdit commands." to book pages of {_book}
+    add "&0&lCommand Basics%nl%%nl%&0Most WorldEdit commands start with a double slash: &2//%nl%%nl%&0Block IDs are Minecraft block names, e.g.:%nl%&2stone%nl%&2oak_planks%nl%&2air" to book pages of {_book}
+    add "&0&lLimits%nl%%nl%&2//limit <amount>%nl%&0Max number of blocks one command may change.%nl%%nl%&8Check the selection size before big edits so the server doesn't lag." to book pages of {_book}
+
+    add "&0&lHistory%nl%%nl%&2//undo%nl%&0Undo the last action.%nl%%nl%&2//redo%nl%&0Redo what you undid.%nl%%nl%&2/clearhistory%nl%&0Clear your WorldEdit history." to book pages of {_book}
+    add "&0&lSelection 1%nl%%nl%&2//sel <shape>%nl%&0Choose the selection shape.%nl%%nl%&0Common shapes:%nl%&2cuboid &0box%nl%&2ellipsoid &0ellipsoid%nl%&2sphere &0sphere" to book pages of {_book}
+    add "&0&lSelection 2%nl%%nl%&2//pos1%nl%&0Point A = where you stand.%nl%%nl%&2//pos2%nl%&0Point B = where you stand.%nl%%nl%&2//hpos1%nl%&0Point A = block you look at." to book pages of {_book}
+    add "&0&lSelection 3%nl%%nl%&2//hpos2%nl%&0Point B = block you look at.%nl%%nl%&2//expand vert%nl%&0Stretch the selection from bedrock to sky.%nl%%nl%&2//size%nl%&0Show the selection size." to book pages of {_book}
+    add "&0&lSelection 4%nl%%nl%&2//count <block ID>%nl%&0Count a block type in the selection.%nl%%nl%&2//distr%nl%&0Show the block distribution in the selection." to book pages of {_book}
+
+    add "&0&lEditing 1%nl%%nl%&2//set <block ID>%nl%&0Fill the selection with one block.%nl%&8e.g. //set air empties it.%nl%%nl%&2//replace <A> <B>%nl%&0Replace every A with B." to book pages of {_book}
+    add "&0&lEditing 2%nl%%nl%&2//overlay <block ID>%nl%&0Cover the top of the selection.%nl%%nl%&2//walls <block ID>%nl%&0Build the four walls.%nl%%nl%&2//outline <block ID>%nl%&0Walls, ceiling and floor." to book pages of {_book}
+    add "&0&lEditing 3%nl%%nl%&2//regen%nl%&0Regenerate the selection.%nl%%nl%&2//move <count> <direction> <leave block>%nl%&0Move the blocks in the selection. Direction and leave block are optional." to book pages of {_book}
+    add "&0&lEditing 4%nl%%nl%&2//stack <count> <direction>%nl%&0Repeat the selection in a direction.%nl%%nl%&8Direction is optional; it usually follows the way you face." to book pages of {_book}
+
+    add "&0&lClipboard%nl%%nl%&2//copy%nl%&0Copy the selection.%nl%%nl%&2//cut%nl%&0Cut the selection.%nl%%nl%&2//paste%nl%&0Paste the clipboard.%nl%%nl%&2/clearclipboard%nl%&0Clear the clipboard." to book pages of {_book}
+    add "&0&lRotate & Flip%nl%%nl%&2//rotate <degrees>%nl%&0Rotate the clipboard, e.g. 90 or 180.%nl%%nl%&2//flip%nl%&0Flip the clipboard.%nl%%nl%&8//copy first, then rotate or flip, then //paste." to book pages of {_book}
+
+    add "&0&lShapes 1%nl%%nl%&2//hcyl <block ID> <radius> <height>%nl%&0Hollow vertical cylinder.%nl%%nl%&2//cyl <block ID> <radius> <height>%nl%&0Solid vertical cylinder." to book pages of {_book}
+    add "&0&lShapes 2%nl%%nl%&2//sphere <block ID> <radius>%nl%&0Solid sphere.%nl%%nl%&2//hsphere <block ID> <radius>%nl%&0Hollow sphere." to book pages of {_book}
+    add "&0&lShapes 3%nl%%nl%&2/forestgen <size> <type> <density>%nl%&0Grow a forest around you.%nl%%nl%&2/pumpkins <size>%nl%&0Grow a pumpkin patch around you." to book pages of {_book}
+
+    add "&0&lOther 1%nl%%nl%&2//fill <block ID> <radius> <depth>%nl%&0Fill a hole.%nl%%nl%&2//drain <radius>%nl%&0Remove water or lava within the radius." to book pages of {_book}
+    add "&0&lOther 2%nl%%nl%&2/fixwater <radius>%nl%&0Calm flowing water.%nl%%nl%&2/removeabove <size> <height>%nl%&0Clear blocks above you.%nl%&2/removebelow <size> <height>%nl%&0Clear blocks below you." to book pages of {_book}
+    add "&0&lOther 3%nl%%nl%&2/snow <radius>%nl%&0Simulate snowfall.%nl%%nl%&2/thaw <radius>%nl%&0Thaw ice and snow." to book pages of {_book}
+    add "&0&lOther 4%nl%%nl%&2/remove snow <radius>%nl%&0Remove snow.%nl%%nl%&2//ex <radius>%nl%&0Put out fires." to book pages of {_book}
+    add "&0&lOther 5%nl%%nl%&2/butcher <radius>%nl%&0Kill nearby mobs.%nl%%nl%&2/remove <type> <radius>%nl%&0Remove nearby entities.%nl%&8e.g. arrows, boats, minecarts, tnt" to book pages of {_book}
+    add "&0&lCompass%nl%%nl%&2Right-click with a compass%nl%&0to teleport through walls." to book pages of {_book}
+    # add "&0&lPlugins & compass%nl%%nl%&2//worldedit version%nl%&0Show the WorldEdit version.%nl%%nl%&2//worldedit reload%nl%&0Reload WorldEdit.%nl%%nl%&2Right-click with a compass%nl%&0to teleport through walls." to book pages of {_book}
+
+    open book {_book} to {_p}
+
+function openPlayerWorldListMenu(p: player):
+    set {_inv} to chest inventory with 6 rows named "Player Worlds"
+
+    # Slot 0 holds the player world guide; clicking it opens the book
+    set slot 0 of {_inv} to written book named "&ePlayer World Guide" with lore "&7Click to open the guide"
+
+    # List every player game world; slot 0 is the guide, so at most 52 worlds, keeping the last slot for the back button
+    set {_i} to 1
+    loop {playerworld::name2id::*}:
+        if {_i} is smaller than 53:
+            set {_display} to loop-index
+            set {_internal} to loop-value
+            set {_creator} to {playerworld::creator::%{_internal}%} ? "Unknown"
+            set {_visits} to {playerworld::visits::%{_internal}%} ? 0
+            set {_visitors} to {playerworld::visitorcount::%{_internal}%} ? 0
+            set slot {_i} of {_inv} to grass block named "&a%{_display}%" with lore "&7Creator: &b%{_creator}% &7- Visits: &e%{_visits}% &7/ &e%{_visitors}% &7players" and "&7Click to teleport to this player world"
+            add 1 to {_i}
+
+    # The back button goes into the slot right after the last world
+    set {_backSlot} to {_i}
+
+    # No worlds at all: show a hint and put the back button right after it
+    if {_i} is 1:
+        set slot 22 of {_inv} to barrier named "&cThere are no player game worlds yet" with lore "&7Create one with /pwcreate <name>"
+        set {_backSlot} to 23
+
+    # ===== New World (first slot after the list) and Back (right after it) - positions swapped =====
+    set {_addSlot} to {_backSlot}
+    set {_backSlot} to {_backSlot} + 1
+    if {_backSlot} is greater than 53:
+        set {_backSlot} to 53
+
+    set slot {_addSlot} of {_inv} to anvil named "&a➕ New World" with lore "&7Create a new player game world" and "&8/pwcreate <name>"
+    set {playermenu::pwAddSlot::%uuid of {_p}%} to {_addSlot}
+
+    set slot {_backSlot} of {_inv} to red stained glass pane named "&cBack" with lore "&7Back to the main menu"
+    set {playermenu::pwBackSlot::%uuid of {_p}%} to {_backSlot}
+
+    open {_inv} to {_p}
+
+# ==========================================
+# B. Triggers
+# ==========================================
+
+on swap hand items:
+    if player is sneaking:
+        cancel event
+        openMainMenu(player)
+
+command /menu:
+    trigger:
+        openMainMenu(player)
+
+# ==========================================
+# C. Click handling
+# ==========================================
+on inventory click:
+
+    # ----- Main menu -----
+    if name of event-inventory is "Main Menu":
+        cancel event
+        if clicked inventory is event-inventory:
+            if clicked slot is 0:
+                close player's inventory
+                send "&a[System] Teleporting you to spawn..." to player
+                execute player command "/spawn"
+
+            else if clicked slot is 1:
+                close player's inventory
+                execute player command "/home"
+
+            else if clicked slot is 2:
+                # Open the game world list
+                wait 1 tick
+                openWorldListMenu(player)
+
+            else if clicked slot is 3:
+                # Open the player game world list
+                wait 1 tick
+                openPlayerWorldListMenu(player)
+
+            else if clicked slot is 4:
+                # More features
+                wait 1 tick
+                openFunctionMenu(player)
+
+            else if clicked slot is {playermenu::gwDeleteSlot::%uuid of player%}:
+                # Delete this game world (admins only; the button position is dynamic, so use the recorded slot)
+                if isAdmin(player) is false:
+                    close player's inventory
+                    send "&cYou don't have permission to delete game worlds!" to player
+                    stop
+
+                set {_currentWorld} to "%player's world%"
+                if {_currentWorld} does not contain "game_":
+                    close player's inventory
+                    send "&cThis only works inside a game world!" to player
+                    stop
+
+                delete {_displayName}
+                loop {gameworld::name2id::*}:
+                    if loop-value is {_currentWorld}:
+                        set {_displayName} to loop-index
+                if {_displayName} is not set:
+                    close player's inventory
+                    send "&cCouldn't find the name of this game world, so it can't be deleted." to player
+                    stop
+
+                close player's inventory
+                wait 1 tick
+                openDeleteGameWorldConfirm(player, {_displayName})
+
+            else if clicked slot is {playermenu::monopolySlot::%uuid of player%}:
+                # Open the Monopoly menu (game_12 only, available to every player)
+                wait 1 tick
+                openMonopolyMenu(player)
+
+            else if clicked slot is 5:
+                # Get the wooden axe: check the rights again so nobody can click a button that isn't there
+                set {_currentWorld} to "%player's world%"
+                if {_currentWorld} does not contain "pw_":
+                    close player's inventory
+                    send "&cThis only works inside a player game world!" to player
+                    stop
+
+                set {_baseWorld} to pw_base({_currentWorld})
+                if canEdit(player's name, {_baseWorld}) is false:
+                    close player's inventory
+                    send "&cYou are not the creator or a co-editor of this world!" to player
+                    stop
+
+                give 1 wooden axe named "&6WorldEdit Wooden Axe" to player
+                close player's inventory
+                send "&a✔ You got the wooden axe - use it to make WorldEdit selections." to player
+
+            else if clicked slot is 6:
+                # Toggle game mode: check the rights again, then hand over to the player world system's own command
+                set {_currentWorld} to "%player's world%"
+                if {_currentWorld} does not contain "pw_":
+                    close player's inventory
+                    send "&cThis only works inside a player game world!" to player
+                    stop
+
+                set {_baseWorld} to pw_base({_currentWorld})
+                if canEdit(player's name, {_baseWorld}) is false:
+                    close player's inventory
+                    send "&cYou are not the creator or a co-editor of this world!" to player
+                    stop
+
+                close player's inventory
+                execute player command "/pwmode"
+
+            else if clicked slot is 7:
+                # Wooden axe guide: same rights check as getting the wooden axe
+                set {_currentWorld} to "%player's world%"
+                if {_currentWorld} does not contain "pw_":
+                    close player's inventory
+                    send "&cThis only works inside a player game world!" to player
+                    stop
+
+                set {_baseWorld} to pw_base({_currentWorld})
+                if canEdit(player's name, {_baseWorld}) is false:
+                    close player's inventory
+                    send "&cYou are not the creator or a co-editor of this world!" to player
+                    stop
+
+                close player's inventory
+                wait 1 tick
+                openWorldEditGuideBook(player)
+
+            else if clicked slot is 8:
+                # Delete this player world (always slot 8)
+                set {_currentWorld} to "%player's world%"
+                if {_currentWorld} contains "pw_":
+                    set {_baseWorld} to pw_base({_currentWorld})
+                    if canEdit(player's name, {_baseWorld}) is false:
+                        close player's inventory
+                        send "&cYou are not the creator or a co-editor of this world!" to player
+                        stop
+
+                    delete {_displayName}
+                    loop {playerworld::name2id::*}:
+                        if loop-value is {_baseWorld}:
+                            set {_displayName} to loop-index
+                    if {_displayName} is not set:
+                        close player's inventory
+                        send "&cCouldn't find the name of this world, so it can't be deleted." to player
+                        stop
+
+                    close player's inventory
+                    wait 1 tick
+                    openDeleteWorldConfirm(player, {_displayName})
+
+    # ----- More features menu -----
+    if name of event-inventory is "More Features":
+        cancel event
+        if clicked inventory is event-inventory:
+            if clicked slot is 0:
+                close player's inventory
+                execute player command "/dice1"
+
+            else if clicked slot is 1:
+                close player's inventory
+                execute player command "/dice2"
+
+            else if clicked slot is 2:
+                close player's inventory
+                execute player command "/dice3"
+
+            else if clicked slot is 3:
+                wait 1 tick
+                openMainMenu(player)
+
+    # ----- Game world list -----
+    if name of event-inventory is "Game Worlds":
+        cancel event
+        if clicked inventory is event-inventory:
+            if clicked slot is {playermenu::gwBackSlot::%uuid of player%}:
+                # Back to the main menu
+                wait 1 tick
+                openMainMenu(player)
+
+            else if clicked slot is {playermenu::gwAddSlot::%uuid of player%}:
+                # New game world (admins only): check the rights again, then open the anvil input
+                if isAdmin(player) is false:
+                    close player's inventory
+                    send "&cYou don't have permission to create game worlds!" to player
+                    stop
+                close player's inventory
+                wait 1 tick
+                openAnvilInput(player, "game_create", "", "Enter a game world name")
+
+            else:
+                # Map the clicked slot back to the world list in the same order
+                set {_j} to 0
+                loop {gameworld::name2id::*}:
+                    if {_j} is clicked slot:
+                        set {_name} to loop-index
+                    add 1 to {_j}
+
+                # Only teleport if a world matched
+                if {_name} is set:
+                    close player's inventory
+                    execute player command "/gwlist %{_name}%"
+
+    # ----- Player game world list -----
+    if name of event-inventory is "Player Worlds":
+        cancel event
+        if clicked inventory is event-inventory:
+            if clicked slot is {playermenu::pwBackSlot::%uuid of player%}:
+                # Back to the main menu
+                wait 1 tick
+                openMainMenu(player)
+
+            else if clicked slot is 0:
+                # Open the player world guide
+                close player's inventory
+                wait 1 tick
+                openPlayerWorldGuideBook(player)
+
+            else if clicked slot is {playermenu::pwAddSlot::%uuid of player%}:
+                # New world: open the anvil input; once confirmed, "on anvil input" runs the create command
+                close player's inventory
+                wait 1 tick
+                openAnvilInput(player, "pw_create", "", "Enter a player world name")
+
+            else:
+                # Map the clicked slot back to the player world list in the same order
+                # Slot 0 is the guide book, so player worlds start at slot 1
+                set {_j} to 1
+                loop {playerworld::name2id::*}:
+                    if {_j} is clicked slot:
+                        set {_name} to loop-index
+                    add 1 to {_j}
+
+                # Only teleport if a world matched
+                if {_name} is set:
+                    close player's inventory
+                    execute player command "/pwlist %{_name}%"
+
+    # ----- Delete confirmation (shared by player worlds and game worlds; the title contains the world name, so use "contains") -----
+    if name of event-inventory contains "Confirm: delete":
+        cancel event
+        if clicked inventory is event-inventory:
+            if clicked slot is 0:
+                # Confirm: the pending variable tells whether it is a game world or a player world
+                if {playermenu::pendingDeleteGameWorld::%uuid of player%} is set:
+                    set {_displayName} to {playermenu::pendingDeleteGameWorld::%uuid of player%}
+                    if isAdmin(player) is false:
+                        close player's inventory
+                        send "&cYou don't have permission to delete game worlds!" to player
+                        delete {playermenu::pendingDeleteGameWorld::%uuid of player%}
+                        stop
+                    delete {playermenu::pendingDeleteGameWorld::%uuid of player%}
+                    close player's inventory
+                    send "&eDeleting game world: &f%{_displayName}%&e..." to player
+                    execute player command "/gwdelete %{_displayName}%"
+
+                else if {playermenu::pendingDeleteWorld::%uuid of player%} is set:
+                    set {_displayName} to {playermenu::pendingDeleteWorld::%uuid of player%}
+                    set {_baseWorld} to {playerworld::name2id::%{_displayName}%}
+                    if {_baseWorld} is not set:
+                        close player's inventory
+                        send "&cWorld not found - deletion cancelled." to player
+                        delete {playermenu::pendingDeleteWorld::%uuid of player%}
+                        stop
+                    if canEdit(player's name, {_baseWorld}) is false:
+                        close player's inventory
+                        send "&cYou don't have permission to delete this world!" to player
+                        delete {playermenu::pendingDeleteWorld::%uuid of player%}
+                        stop
+                    delete {playermenu::pendingDeleteWorld::%uuid of player%}
+                    close player's inventory
+                    send "&eDeleting world: &f%{_displayName}%&e..." to player
+                    execute player command "/pwdelete %{_displayName}%"
+
+            else if clicked slot is 1:
+                # Cancel → back to the main menu
+                delete {playermenu::pendingDeleteWorld::%uuid of player%}
+                delete {playermenu::pendingDeleteGameWorld::%uuid of player%}
+                wait 1 tick
+                openMainMenu(player)
+
+# ==========================================
+# D. Drag handling
+# ==========================================
+on inventory drag:
+    if name of event-inventory is "Main Menu":
+        cancel event
+    if name of event-inventory is "More Features":
+        cancel event
+    if name of event-inventory is "Game Worlds":
+        cancel event
+    if name of event-inventory is "Player Worlds":
+        cancel event
+    if name of event-inventory contains "Confirm: delete":
+        cancel event
+
+# ==========================================
+# E. Anvil input callback: create worlds
+#   Depends on anvil_input_api.sk:
+#     openAnvilInput(), on anvil input, anvilText(), anvilId()
+#   Flow: click "➕ New World" → type the name in the anvil → confirm → runs /pwcreate <name>
+# ==========================================
+on anvil input:
+    set {_id} to anvilId(player)
+    set {_name} to anvilText(player)
+    if {_name} is "":
+        stop
+    if {_id} is "pw_create":
+        execute player command "/pwcreate %{_name}%"
+    else if {_id} is "game_create":
+        execute player command "/gwcreate %{_name}%"
+
+# ==========================================
+# F. Monopoly menu (works with monopoly-helper.sk, game_12 only)
+#    Every player can use it; Start Game / Bank are only shown to and usable by admins
+#    The buttons run the primary monopoly_ commands (avoids clashes with the /pay, /money, ... of economy plugins)
+# ==========================================
+
+function openMonopolyMenu(p: player):
+    set {_inv} to chest inventory with 3 rows named "Monopoly Menu"
+    # Row 1: basic actions
+    set slot 0 of {_inv} to snowball named "&b🎲 Roll Dice" with lore "&7Roll two dice"
+    set slot 1 of {_inv} to gold ingot named "&e💰 My Cash" with lore "&7Check how much cash you have"
+    set slot 2 of {_inv} to paper named "&a🏆 Cash Ranking" with lore "&7Cash ranking of the players on the map"
+    set slot 3 of {_inv} to lime concrete named "&a🏁 Pass GO" with lore "&7Collect your GO salary"
+    set slot 4 of {_inv} to gold nugget named "&e💸 Pay a Player" with lore "&7Pay rent / tolls to another player"
+    # Row 2: taxes / Chance / Fate / help
+    set slot 9 of {_inv} to iron ingot named "&c🧾 Pay Income Tax" with lore "&7Pay the income tax"
+    set slot 10 of {_inv} to diamond named "&b💎 Pay Luxury Tax" with lore "&7Pay the luxury tax"
+    set slot 11 of {_inv} to chest named "&6❓ Draw Chance" with lore "&7Draw a Chance card"
+    set slot 12 of {_inv} to ender chest named "&5❗ Draw Fate" with lore "&7Draw a Fate card"
+    set slot 13 of {_inv} to book named "&f📖 Commands" with lore "&7Show every Monopoly command"
+    # Row 3: admin tools
+    if isAdmin({_p}) is true:
+        set slot 18 of {_inv} to emerald block named "&a🎮 Start Game" with lore "&7Give starting cash to everyone on the map" and "&8Admins only"
+        set slot 19 of {_inv} to gold block named "&6🏦 Bank" with lore "&7Give / take / set a player's cash" and "&8Admins only"
+    # Back
+    set slot 26 of {_inv} to red stained glass pane named "&cBack" with lore "&7Back to the main menu"
+    open {_inv} to {_p}
+
+# ----- Bank submenu (admins only) -----
+function openDfwBankMenu(p: player):
+    set {_inv} to chest inventory with 3 rows named "Monopoly Bank"
+    set slot 0 of {_inv} to lime concrete named "&aGive Money" with lore "&7The bank pays a player"
+    set slot 1 of {_inv} to red concrete named "&cTake Money" with lore "&7The bank collects money from a player"
+    set slot 2 of {_inv} to yellow concrete named "&eSet Cash" with lore "&7Set a player's cash directly"
+    set slot 8 of {_inv} to red stained glass pane named "&cBack" with lore "&7Back to the Monopoly menu"
+    open {_inv} to {_p}
+
+# ----- Player picker submenu (shared by Pay and Bank) -----
+#   purpose: "pay" / "bank_give" / "bank_take" / "bank_set"
+function openDfwPlayerPick(p: player, purpose: text):
+    set {_inv} to chest inventory with 6 rows named "Monopoly: Pick a Player"
+    set {dfw::gui::purpose::%uuid of {_p}%} to {_purpose}
+    delete {dfw::gui::picklist::%uuid of {_p}%::*}
+    set {_i} to 0
+    loop all players:
+        if "%world of loop-player%" is "game_12":
+            set {_skip} to false
+            if {_purpose} is "pay":
+                if loop-player is {_p}:
+                    set {_skip} to true
+            if {_skip} is false:
+                if {_i} is smaller than 53:
+                    set slot {_i} of {_inv} to name tag named "&a%loop-player%" with lore "&7Click to pick this player"
+                    set {dfw::gui::picklist::%uuid of {_p}%::%{_i}%} to "%loop-player%"
+                    add 1 to {_i}
+    set {_ret} to {_i}
+    if {_ret} is 0:
+        set slot 22 of {_inv} to barrier named "&cNo other players on the map"
+        set {_ret} to 23
+    if {_ret} is greater than 53:
+        set {_ret} to 53
+    set slot {_ret} of {_inv} to red stained glass pane named "&cBack" with lore "&7Back to the Monopoly menu"
+    set {dfw::gui::pickreturn::%uuid of {_p}%} to {_ret}
+    open {_inv} to {_p}
+
+# ==========================================
+# F-2. Monopoly menu clicks
+# ==========================================
+on inventory click:
+    # ----- Monopoly menu -----
+    if name of event-inventory is "Monopoly Menu":
+        cancel event
+        if clicked inventory is event-inventory:
+            if "%player's world%" is not "game_12":
+                close player's inventory
+                send "&cThis menu only works on the Monopoly map (game_12)!" to player
+                stop
+            if clicked slot is 0:
+                close player's inventory
+                execute player command "/monopoly_roll"
+            else if clicked slot is 1:
+                close player's inventory
+                execute player command "/monopoly_cash"
+            else if clicked slot is 2:
+                close player's inventory
+                execute player command "/monopoly_top"
+            else if clicked slot is 3:
+                close player's inventory
+                execute player command "/monopoly_passgo"
+            else if clicked slot is 4:
+                wait 1 tick
+                openDfwPlayerPick(player, "pay")
+            else if clicked slot is 9:
+                close player's inventory
+                execute player command "/monopoly_tax income"
+            else if clicked slot is 10:
+                close player's inventory
+                execute player command "/monopoly_tax luxury"
+            else if clicked slot is 11:
+                close player's inventory
+                execute player command "/monopoly_chance"
+            else if clicked slot is 12:
+                close player's inventory
+                execute player command "/monopoly_fate"
+            else if clicked slot is 13:
+                close player's inventory
+                execute player command "/monopoly_help"
+            else if clicked slot is 18:
+                if isAdmin(player) is false:
+                    close player's inventory
+                    send "&cOnly admins can use this!" to player
+                    stop
+                close player's inventory
+                execute player command "/monopoly_start"
+            else if clicked slot is 19:
+                if isAdmin(player) is false:
+                    close player's inventory
+                    send "&cOnly admins can use this!" to player
+                    stop
+                wait 1 tick
+                openDfwBankMenu(player)
+            else if clicked slot is 26:
+                wait 1 tick
+                openMainMenu(player)
+
+    # ----- Monopoly bank -----
+    if name of event-inventory is "Monopoly Bank":
+        cancel event
+        if clicked inventory is event-inventory:
+            if isAdmin(player) is false:
+                close player's inventory
+                send "&cOnly admins can use the bank!" to player
+                stop
+            if clicked slot is 0:
+                wait 1 tick
+                openDfwPlayerPick(player, "bank_give")
+            else if clicked slot is 1:
+                wait 1 tick
+                openDfwPlayerPick(player, "bank_take")
+            else if clicked slot is 2:
+                wait 1 tick
+                openDfwPlayerPick(player, "bank_set")
+            else if clicked slot is 8:
+                wait 1 tick
+                openMonopolyMenu(player)
+
+    # ----- Monopoly player picker -----
+    if name of event-inventory is "Monopoly: Pick a Player":
+        cancel event
+        if clicked inventory is event-inventory:
+            if clicked slot is {dfw::gui::pickreturn::%uuid of player%}:
+                wait 1 tick
+                openMonopolyMenu(player)
+            else:
+                set {_target} to {dfw::gui::picklist::%uuid of player%::%clicked slot%}
+                if {_target} is set:
+                    set {_purpose} to {dfw::gui::purpose::%uuid of player%}
+                    close player's inventory
+                    wait 1 tick
+                    if {_purpose} is "pay":
+                        openAnvilInput(player, "dfw_pay:%{_target}%", "", "Amount to pay %{_target}%")
+                    else if {_purpose} is "bank_give":
+                        openAnvilInput(player, "dfw_bank:give:%{_target}%", "", "How much to give %{_target}%")
+                    else if {_purpose} is "bank_take":
+                        openAnvilInput(player, "dfw_bank:take:%{_target}%", "", "How much to take from %{_target}%")
+                    else if {_purpose} is "bank_set":
+                        openAnvilInput(player, "dfw_bank:set:%{_target}%", "", "Set %{_target}%'s cash to")
+
+# ==========================================
+# F-3. Monopoly menu drags (always cancelled)
+# ==========================================
+on inventory drag:
+    if name of event-inventory is "Monopoly Menu":
+        cancel event
+    if name of event-inventory is "Monopoly Bank":
+        cancel event
+    if name of event-inventory is "Monopoly: Pick a Player":
+        cancel event
+
+# ==========================================
+# F-4. Monopoly anvil input callback (pay / bank amount)
+#   Depends on openAnvilInput / on anvil input / anvilId / anvilText from anvil_input_api.sk
+# ==========================================
+on anvil input:
+    set {_id} to anvilId(player)
+    set {_text} to anvilText(player)
+    if {_id} contains "dfw_pay:":
+        set {_parts::*} to {_id} split at ":"
+        set {_target} to {_parts::2}
+        set {_n} to {_text} parsed as integer
+        if {_n} is not set:
+            send "&cThe amount must be a number!" to player
+            stop
+        execute player command "/monopoly_pay %{_target}% %{_n}%"
+    else if {_id} contains "dfw_bank:":
+        set {_parts::*} to {_id} split at ":"
+        set {_action} to {_parts::2}
+        set {_target} to {_parts::3}
+        set {_n} to {_text} parsed as integer
+        if {_n} is not set:
+            send "&cThe amount must be a number!" to player
+            stop
+        if {_action} is "give":
+            execute player command "/monopoly_bank give %{_target}% %{_n}%"
+        else if {_action} is "take":
+            execute player command "/monopoly_bank take %{_target}% %{_n}%"
+        else if {_action} is "set":
+            execute player command "/monopoly_bank set %{_target}% %{_n}%"
